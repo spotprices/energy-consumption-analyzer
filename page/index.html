@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Energy Consumption Analyzer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/1.2.1/chartjs-plugin-zoom.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .upload-section {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+        }
+        .chart-container {
+            margin-top: 30px;
+            height: 400px;
+            position: relative;
+        }
+        .stats-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .stat-card {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 15px;
+            flex: 1;
+            min-width: 200px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .stat-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #555;
+        }
+        .stat-value {
+            font-size: 24px;
+            color: #333;
+        }
+        .instructions {
+            background-color: #e9f7fe;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            margin-right: 10px;
+        }
+        .filter-section {
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        @media (max-width: 768px) {
+            .stats-container {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Energy Consumption Analyzer</h1>
+        
+        <div class="instructions">
+            <p><strong>Instructions:</strong> Upload your CSV file with energy consumption data. The file should have a "Zeitraum" (Timestamp) column and a consumption column like "Hauptverteiler (kWh)". The timestamp should be in DD.MM.YYYY HH:MM format.</p>
+        </div>
+        
+        <div class="upload-section">
+            <input type="file" id="csv-file" accept=".csv" />
+            <button id="upload-button">Analyze Data</button>
+        </div>
+        
+        <div id="analysis-container" style="display: none;">
+            <div class="filter-section">
+                <label for="date-range">View:</label>
+                <select id="date-range">
+                    <option value="all">All Data</option>
+                    <option value="day">Daily</option>
+                    <option value="week">Weekly</option>
+                    <option value="month">Monthly</option>
+                </select>
+                
+                <div id="specific-range" style="display: none;">
+                    <label for="specific-selector">Select:</label>
+                    <select id="specific-selector"></select>
+                </div>
+                
+                <button id="reset-zoom">Reset Zoom</button>
+            </div>
+            
+            <div class="chart-container">
+                <canvas id="consumption-chart"></canvas>
+            </div>
+            
+            <div class="stats-container">
+                <div class="stat-card">
+                    <div class="stat-title">Average Consumption</div>
+                    <div id="avg-consumption" class="stat-value">0 kWh</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Total Consumption</div>
+                    <div id="total-consumption" class="stat-value">0 kWh</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Peak Consumption</div>
+                    <div id="peak-consumption" class="stat-value">0 kWh</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Data Points</div>
+                    <div id="data-points" class="stat-value">0</div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <canvas id="daily-sum-chart"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <canvas id="weekday-chart"></canvas>
+            </div>
+            
+            <div class="stats-container">
+                <div class="stat-card">
+                    <div class="stat-title">Monthly Totals</div>
+                    <div id="monthly-stats"></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Average Daily Totals by Weekday</div>
+                    <div id="weekday-stats"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            let consumptionData = [];
+            let consumptionChart = null;
+            let dailySumChart = null;
+            let weekdayChart = null;
+            
+            const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            
+            document.getElementById('upload-button').addEventListener('click', handleFileUpload);
+            document.getElementById('date-range').addEventListener('change', handleDateRangeChange);
+            document.getElementById('specific-selector').addEventListener('change', filterData);
+            document.getElementById('reset-zoom').addEventListener('click', resetZoom);
+            
+            function handleFileUpload() {
+                const fileInput = document.getElementById('csv-file');
+                const file = fileInput.files[0];
+                
+                if (!file) {
+                    alert('Please select a CSV file.');
+                    return;
+                }
+                
+                Papa.parse(file, {
+                    header: true,
+                    delimiter: ";",
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        processData(results.data);
+                    },
+                    error: function(error) {
+                        console.error('Error parsing CSV:', error);
+                        alert('Error parsing CSV file. Please check the format.');
+                    }
+                });
+            }
+            
+            function processData(data) {
+                // Convert the data to a usable format
+                consumptionData = data.map(row => {
+                    // Get the timestamp and consumption values
+                    const timestampStr = row["Zeitraum"];
+                    let consumptionStr = row["Hauptverteiler (kWh)"];
+                    
+                    // Parse the timestamp (DD.MM.YYYY HH:MM format)
+                    const [datePart, timePart] = timestampStr.split(' ');
+                    const [day, month, year] = datePart.split('.');
+                    const [hours, minutes] = timePart.split(':');
+                    
+                    const timestamp = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hours), parseInt(minutes));
+                    
+                    // Parse the consumption value (replace comma with dot for decimal)
+                    consumptionStr = consumptionStr.replace(',', '.');
+                    const consumption = parseFloat(consumptionStr);
+                    
+                    return {
+                        timestamp,
+                        consumption,
+                        day: timestamp.getDate(),
+                        month: timestamp.getMonth(),
+                        year: timestamp.getFullYear(),
+                        weekday: timestamp.getDay(),
+                        hour: timestamp.getHours(),
+                        minute: timestamp.getMinutes()
+                    };
+                });
+                
+                // Sort data by timestamp
+                consumptionData.sort((a, b) => a.timestamp - b.timestamp);
+                
+                // Show the analysis container
+                document.getElementById('analysis-container').style.display = 'block';
+                
+                // Initialize the date range selector
+                initializeDateRange();
+                
+                // Display the data
+                filterData();
+            }
+            
+            function initializeDateRange() {
+                const dateRangeSelect = document.getElementById('date-range');
+                const specificSelector = document.getElementById('specific-selector');
+                
+                // Clear existing options
+                specificSelector.innerHTML = '';
+                
+                // Get unique values based on selected range
+                const range = dateRangeSelect.value;
+                
+                if (range === 'all') {
+                    document.getElementById('specific-range').style.display = 'none';
+                } else {
+                    document.getElementById('specific-range').style.display = 'inline-block';
+                    
+                    let uniqueValues = new Set();
+                    
+                    if (range === 'day') {
+                        // Get unique days
+                        consumptionData.forEach(item => {
+                            const dateStr = `${item.day}.${item.month + 1}.${item.year}`;
+                            uniqueValues.add(dateStr);
+                        });
+                    } else if (range === 'week') {
+                        // Get unique weeks (approximated by starting day of the week)
+                        consumptionData.forEach(item => {
+                            const date = new Date(item.timestamp);
+                            const firstDayOfWeek = new Date(date);
+                            firstDayOfWeek.setDate(date.getDate() - date.getDay());
+                            const weekStr = `Week of ${firstDayOfWeek.getDate()}.${firstDayOfWeek.getMonth() + 1}.${firstDayOfWeek.getFullYear()}`;
+                            uniqueValues.add(weekStr);
+                        });
+                    } else if (range === 'month') {
+                        // Get unique months
+                        consumptionData.forEach(item => {
+                            const monthStr = `${monthNames[item.month]} ${item.year}`;
+                            uniqueValues.add(monthStr);
+                        });
+                    }
+                    
+                    // Add options to the selector
+                    Array.from(uniqueValues).sort().forEach(value => {
+                        const option = document.createElement('option');
+                        option.value = value;
+                        option.textContent = value;
+                        specificSelector.appendChild(option);
+                    });
+                }
+                
+                filterData();
+            }
+            
+            function handleDateRangeChange() {
+                initializeDateRange();
+            }
+            
+            function filterData() {
+                const dateRangeSelect = document.getElementById('date-range');
+                const specificSelector = document.getElementById('specific-selector');
+                
+                const range = dateRangeSelect.value;
+                let filteredData = [...consumptionData];
+                
+                if (range !== 'all' && specificSelector.value) {
+                    const selectedValue = specificSelector.value;
+                    
+                    if (range === 'day') {
+                        const [day, month, year] = selectedValue.split('.');
+                        filteredData = consumptionData.filter(item => 
+                            item.day === parseInt(day) && 
+                            (item.month + 1) === parseInt(month) && 
+                            item.year === parseInt(year)
+                        );
+                    } else if (range === 'week') {
+                        const weekDateStr = selectedValue.replace('Week of ', '');
+                        const [day, month, year] = weekDateStr.split('.');
+                        const selectedDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+                        
+                        // Calculate the start and end of the selected week
+                        const weekStart = new Date(selectedDate);
+                        const weekEnd = new Date(selectedDate);
+                        weekEnd.setDate(weekStart.getDate() + 6);
+                        
+                        filteredData = consumptionData.filter(item => 
+                            item.timestamp >= weekStart && 
+                            item.timestamp <= weekEnd
+                        );
+                    } else if (range === 'month') {
+                        const [monthName, year] = selectedValue.split(' ');
+                        const monthIndex = monthNames.indexOf(monthName);
+                        
+                        filteredData = consumptionData.filter(item => 
+                            item.month === monthIndex && 
+                            item.year === parseInt(year)
+                        );
+                    }
+                }
+                
+                updateCharts(filteredData);
+                updateStats(filteredData);
+            }
+            
+            function updateCharts(data) {
+                // Prepare data for charts
+                const labels = data.map(item => {
+                    const date = item.timestamp;
+                    const weekday = weekdayNames[date.getDay()];
+                    return `${date.toLocaleDateString()} ${date.toLocaleTimeString()} (${weekday})`;
+                });
+                
+                const consumptionValues = data.map(item => item.consumption);
+                
+                // Main consumption chart
+                updateConsumptionChart(labels, consumptionValues);
+                
+                // Daily sum chart
+                updateDailySumChart(data);
+                
+                // Weekday chart
+                updateWeekdayChart(data);
+            }
+            
+            function updateConsumptionChart(labels, values) {
+                const ctx = document.getElementById('consumption-chart').getContext('2d');
+                
+                if (consumptionChart) {
+                    consumptionChart.destroy();
+                }
+                
+                consumptionChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Energy Consumption (kWh)',
+                            data: values,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 1,
+                            pointHoverRadius: 5,
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                ticks: {
+                                    maxRotation: 45,
+                                    minRotation: 45
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'kWh'
+                                }
+                            }
+                        },
+                        plugins: {
+                            zoom: {
+                                pan: {
+                                    enabled: true,
+                                    mode: 'xy'
+                                },
+                                zoom: {
+                                    wheel: {
+                                        enabled: true
+                                    },
+                                    pinch: {
+                                        enabled: true
+                                    },
+                                    mode: 'xy'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Energy Consumption Over Time'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            function updateDailySumChart(data) {
+                // Group by day and calculate sum
+                const dailyData = {};
+                
+                data.forEach(item => {
+                    const dateStr = `${item.day}.${item.month + 1}.${item.year}`;
+                    if (!dailyData[dateStr]) {
+                        dailyData[dateStr] = {
+                            total: 0,
+                            date: new Date(item.year, item.month, item.day),
+                            weekday: item.weekday
+                        };
+                    }
+                    dailyData[dateStr].total += item.consumption;
+                });
+                
+                // Convert to array and sort by date
+                const dailySums = Object.keys(dailyData).map(key => {
+                    return {
+                        date: key,
+                        fullDate: dailyData[key].date,
+                        weekday: dailyData[key].weekday,
+                        sum: dailyData[key].total
+                    };
+                }).sort((a, b) => a.fullDate - b.fullDate);
+                
+                const dailyLabels = dailySums.map(item => {
+                    const weekday = weekdayNames[item.weekday];
+                    return `${item.date} (${weekday})`;
+                });
+                const dailyValues = dailySums.map(item => item.sum);
+                
+                const ctx = document.getElementById('daily-sum-chart').getContext('2d');
+                
+                if (dailySumChart) {
+                    dailySumChart.destroy();
+                }
+                
+                dailySumChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: dailyLabels,
+                        datasets: [{
+                            label: 'Daily Total Consumption (kWh)',
+                            data: dailyValues,
+                            backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                ticks: {
+                                    maxRotation: 45,
+                                    minRotation: 45
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'kWh'
+                                }
+                            }
+                        },
+                        plugins: {
+                            zoom: {
+                                pan: {
+                                    enabled: true,
+                                    mode: 'x'
+                                },
+                                zoom: {
+                                    wheel: {
+                                        enabled: true
+                                    },
+                                    pinch: {
+                                        enabled: true
+                                    },
+                                    mode: 'x'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Daily Total Consumption'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            function updateWeekdayChart(data) {
+                // First, group all data points by day
+                const dailyData = {};
+                
+                data.forEach(item => {
+                    const dateStr = `${item.day}.${item.month + 1}.${item.year}`;
+                    if (!dailyData[dateStr]) {
+                        dailyData[dateStr] = {
+                            total: 0,
+                            weekday: item.weekday
+                        };
+                    }
+                    dailyData[dateStr].total += item.consumption;
+                });
+                
+                // Then group the daily totals by weekday
+                const weekdayData = Array(7).fill().map(() => ({ totalSum: 0, dayCount: 0 }));
+                
+                Object.values(dailyData).forEach(day => {
+                    weekdayData[day.weekday].totalSum += day.total;
+                    weekdayData[day.weekday].dayCount += 1;
+                });
+                
+                // Calculate average daily total for each weekday
+                const weekdayTotals = weekdayData.map((item, index) => {
+                    return {
+                        weekday: weekdayNames[index],
+                        averageDailyTotal: item.dayCount > 0 ? item.totalSum / item.dayCount : 0
+                    };
+                });
+                
+                const weekdayLabels = weekdayTotals.map(item => item.weekday);
+                const weekdayValues = weekdayTotals.map(item => item.averageDailyTotal);
+                
+                const ctx = document.getElementById('weekday-chart').getContext('2d');
+                
+                if (weekdayChart) {
+                    weekdayChart.destroy();
+                }
+                
+                weekdayChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: weekdayLabels,
+                        datasets: [{
+                            label: 'Average Daily Total by Weekday (kWh)',
+                            data: weekdayValues,
+                            backgroundColor: 'rgba(255, 159, 64, 0.5)',
+                            borderColor: 'rgba(255, 159, 64, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'kWh'
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Average Daily Total by Weekday'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            function updateStats(data) {
+                // Calculate overall stats
+                const totalConsumption = data.reduce((sum, item) => sum + item.consumption, 0);
+                const avgConsumption = data.length > 0 ? totalConsumption / data.length : 0;
+                const peakConsumption = data.length > 0 ? Math.max(...data.map(item => item.consumption)) : 0;
+                
+                // Update the stat cards
+                document.getElementById('avg-consumption').textContent = avgConsumption.toFixed(2) + ' kWh';
+                document.getElementById('total-consumption').textContent = totalConsumption.toFixed(2) + ' kWh';
+                document.getElementById('peak-consumption').textContent = peakConsumption.toFixed(2) + ' kWh';
+                document.getElementById('data-points').textContent = data.length;
+                
+                // Calculate monthly totals
+                const monthlyData = {};
+                
+                data.forEach(item => {
+                    const monthYear = `${monthNames[item.month]} ${item.year}`;
+                    if (!monthlyData[monthYear]) {
+                        monthlyData[monthYear] = {
+                            total: 0
+                        };
+                    }
+                    monthlyData[monthYear].total += item.consumption;
+                });
+                
+                let monthlyHtml = '';
+                Object.keys(monthlyData).forEach(key => {
+                    monthlyHtml += `<div><strong>${key}:</strong> ${monthlyData[key].total.toFixed(2)} kWh</div>`;
+                });
+                
+                document.getElementById('monthly-stats').innerHTML = monthlyHtml || 'No data available';
+                
+                // Calculate weekday daily totals
+                // First, group by day
+                const dailyTotals = {};
+                
+                data.forEach(item => {
+                    const dateStr = `${item.day}.${item.month + 1}.${item.year}`;
+                    if (!dailyTotals[dateStr]) {
+                        dailyTotals[dateStr] = {
+                            total: 0,
+                            weekday: item.weekday
+                        };
+                    }
+                    dailyTotals[dateStr].total += item.consumption;
+                });
+                
+                // Then group the daily totals by weekday
+                const weekdayData = Array(7).fill().map(() => ({ totalSum: 0, dayCount: 0 }));
+                
+                Object.values(dailyTotals).forEach(day => {
+                    weekdayData[day.weekday].totalSum += day.total;
+                    weekdayData[day.weekday].dayCount += 1;
+                });
+                
+                let weekdayHtml = '';
+                weekdayData.forEach((item, index) => {
+                    if (item.dayCount > 0) {
+                        const avgDailyTotal = item.totalSum / item.dayCount;
+                        weekdayHtml += `<div><strong>${weekdayNames[index]}:</strong> ${avgDailyTotal.toFixed(2)} kWh/day</div>`;
+                    }
+                });
+                
+                document.getElementById('weekday-stats').innerHTML = weekdayHtml || 'No data available';
+            }
+            
+            function resetZoom() {
+                if (consumptionChart) {
+                    consumptionChart.resetZoom();
+                }
+                if (dailySumChart) {
+                    dailySumChart.resetZoom();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
