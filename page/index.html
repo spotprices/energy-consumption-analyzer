@@ -106,7 +106,7 @@
         <h1>Energy Consumption Analyzer</h1>
         
         <div class="instructions">
-            <p><strong>Instructions:</strong> Upload your CSV file with energy consumption data. The file should have a "Zeitraum" (Timestamp) column and a consumption column like "Hauptverteiler (kWh)". The timestamp should be in DD.MM.YYYY HH:MM format.</p>
+            <p><strong>Instructions:</strong> Upload your CSV file with energy consumption data. The file should have a timestamp column (first column) in DD.MM.YYYY HH:MM format and a consumption column (second column) with numeric values. The application will automatically detect these columns regardless of their names.</p>
         </div>
         
         <div class="upload-section">
@@ -217,9 +217,14 @@
             function processData(data) {
                 // Convert the data to a usable format
                 consumptionData = data.map(row => {
+                    // Get column names (first column is timestamp, second is consumption)
+                    const columns = Object.keys(row);
+                    const timestampColumn = columns[0]; // First column (usually "Zeitraum")
+                    const consumptionColumn = columns[1]; // Second column (consumption values)
+                    
                     // Get the timestamp and consumption values
-                    const timestampStr = row["Zeitraum"];
-                    let consumptionStr = row["Hauptverteiler (kWh)"];
+                    const timestampStr = row[timestampColumn];
+                    let consumptionStr = row[consumptionColumn];
                     
                     // Parse the timestamp (DD.MM.YYYY HH:MM format)
                     const [datePart, timePart] = timestampStr.split(' ');
@@ -391,7 +396,7 @@
                     data: {
                         labels: labels,
                         datasets: [{
-                            label: 'Energy Consumption (kWh)',
+                            label: 'Energy Consumption ',
                             data: values,
                             borderColor: 'rgba(75, 192, 192, 1)',
                             backgroundColor: 'rgba(75, 192, 192, 0.2)',
@@ -487,7 +492,7 @@
                     data: {
                         labels: dailyLabels,
                         datasets: [{
-                            label: 'Daily Total Consumption (kWh)',
+                            label: 'Daily Total Consumption',
                             data: dailyValues,
                             backgroundColor: 'rgba(54, 162, 235, 0.5)',
                             borderColor: 'rgba(54, 162, 235, 1)',
@@ -582,7 +587,7 @@
                     data: {
                         labels: weekdayLabels,
                         datasets: [{
-                            label: 'Average Daily Total by Weekday (kWh)',
+                            label: 'Average Daily Total by Weekday',
                             data: weekdayValues,
                             backgroundColor: 'rgba(255, 159, 64, 0.5)',
                             borderColor: 'rgba(255, 159, 64, 1)',
@@ -618,9 +623,22 @@
                 const peakConsumption = data.length > 0 ? Math.max(...data.map(item => item.consumption)) : 0;
                 
                 // Update the stat cards
-                document.getElementById('avg-consumption').textContent = avgConsumption.toFixed(2) + ' kWh';
-                document.getElementById('total-consumption').textContent = totalConsumption.toFixed(2) + ' kWh';
-                document.getElementById('peak-consumption').textContent = peakConsumption.toFixed(2) + ' kWh';
+                // Get unit from the column name if possible, otherwise use generic units
+                let unit = '';
+                if (consumptionData.length > 0) {
+                    const columns = Object.keys(consumptionData[0]);
+                    const consumptionColumn = columns[1];
+                    
+                    // Try to extract unit from column name (assumes format like "Value (unit)")
+                    const unitMatch = consumptionColumn.match(/\(([^)]+)\)/);
+                    if (unitMatch && unitMatch[1]) {
+                        unit = ' ' + unitMatch[1];
+                    }
+                }
+                
+                document.getElementById('avg-consumption').textContent = avgConsumption.toFixed(2) + unit;
+                document.getElementById('total-consumption').textContent = totalConsumption.toFixed(2) + unit;
+                document.getElementById('peak-consumption').textContent = peakConsumption.toFixed(2) + unit;
                 document.getElementById('data-points').textContent = data.length;
                 
                 // Calculate monthly totals
@@ -638,7 +656,18 @@
                 
                 let monthlyHtml = '';
                 Object.keys(monthlyData).forEach(key => {
-                    monthlyHtml += `<div><strong>${key}:</strong> ${monthlyData[key].total.toFixed(2)} kWh</div>`;
+                    // Get unit from column name if available
+                    let unit = '';
+                    if (consumptionData.length > 0) {
+                        const columns = Object.keys(consumptionData[0]);
+                        const consumptionColumn = columns[1];
+                        const unitMatch = consumptionColumn.match(/\(([^)]+)\)/);
+                        if (unitMatch && unitMatch[1]) {
+                            unit = ' ' + unitMatch[1];
+                        }
+                    }
+                    
+                    monthlyHtml += `<div><strong>${key}:</strong> ${monthlyData[key].total.toFixed(2)}${unit}</div>`;
                 });
                 
                 document.getElementById('monthly-stats').innerHTML = monthlyHtml || 'No data available';
@@ -670,7 +699,19 @@
                 weekdayData.forEach((item, index) => {
                     if (item.dayCount > 0) {
                         const avgDailyTotal = item.totalSum / item.dayCount;
-                        weekdayHtml += `<div><strong>${weekdayNames[index]}:</strong> ${avgDailyTotal.toFixed(2)} kWh/day</div>`;
+                        
+                        // Get unit from column name if available
+                        let unit = '';
+                        if (consumptionData.length > 0) {
+                            const columns = Object.keys(consumptionData[0]);
+                            const consumptionColumn = columns[1];
+                            const unitMatch = consumptionColumn.match(/\(([^)]+)\)/);
+                            if (unitMatch && unitMatch[1]) {
+                                unit = ' ' + unitMatch[1];
+                            }
+                        }
+                        
+                        weekdayHtml += `<div><strong>${weekdayNames[index]}:</strong> ${avgDailyTotal.toFixed(2)}${unit}/day</div>`;
                     }
                 });
                 
